@@ -24,6 +24,19 @@
 
 Prisma was chosen for this MVP due to its developer productivity, auto-generated TypeScript types, and declarative schema migrations. However, it abstracts raw SQL and adds a query engine layer that may introduce overhead at scale. For high-performance or complex query scenarios, alternatives like **Drizzle ORM** (thinner abstraction, closer to SQL) or **direct query builders** (e.g., Knex, pg) would be evaluated. This is a conscious trade-off: prioritizing type-safety and development speed for an MVP over fine-grained SQL control.
 
+### Note on Date-Only Fields (`birthday`)
+
+Prisma does not natively support a `Date`-only type (without time). The `DateTime` type maps to PostgreSQL's `TIMESTAMP(3)`, which stores date + time with millisecond precision.
+
+For fields like `birthday`, where only `YYYY-MM-DD` is semantically meaningful:
+
+- **In the database:** stored as `TIMESTAMP(3)` with time set to `00:00:00.000Z`
+- **In the API/frontend:** formatted to date-only with `date.toISOString().split("T")[0]`
+- **Why not `String`:** loses DB-level date validation (invalid dates like `2000-02-31` would be accepted), prevents range queries (`WHERE birthday BETWEEN ...`), and breaks type-safety
+- **Why not PostgreSQL `DATE` type directly:** Prisma's schema language doesn't expose a pure `Date` type for PostgreSQL. Using `@db.Date` would still return a JavaScript `Date` object with a zeroed time component — no practical benefit over `DateTime`
+
+This is a known Prisma limitation. If date-only precision becomes critical (e.g., timezone-sensitive logic across date boundaries), a raw query or Drizzle ORM would be considered.
+
 ---
 
 # Implementation Stages
