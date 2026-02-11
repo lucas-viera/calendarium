@@ -3,8 +3,11 @@
 ## Project Overview
 
 **Name:** Calendarium
+
 **Author:** Lucas Viera
+
 **Start Date:** 2026-02-11
+
 **Stack:** Next.js (App Router) · TypeScript · Prisma · PostgreSQL · Docker · bcrypt · Zod
 
 ---
@@ -115,34 +118,347 @@ docker compose up -d
 
 # Verify container is running
 docker ps
-# → calendarium-db running, port 5432 mapped
+# → calendarium-db running, port 5433 mapped to internal 5432
+
+# Install Prisma CLI and dependencies
+npm install prisma@6 --save-dev
+npm install @prisma/client@6
+npm install dotenv --save-dev
+npm install pg --save-dev  # Used for debugging TCP connection
+
+# Initialize Prisma
+npx prisma init
+
+# Validate schema
+npx prisma validate
+# → The schema is valid 🚀
+
+# Run first migration
+unset DATABASE_URL && npx prisma migrate dev --name init
+# → Migration 20260211182853_init applied
+# → Prisma Client generated (v6.19.2)
+
+# Verify tables created
+docker exec -it calendarium-db psql -U calendarium -d calendarium -c "\dt"
+# → users table + _prisma_migrations table
 ```
 
 ### What Was Done
 
-- Created `docker-compose.yml` with a PostgreSQL 16 (Alpine) service
+- Created `docker-compose.yml` with a PostgreSQL 16 (Alpine) service on port **5433** (to avoid conflict with local PostgreSQL)
 - Configured database credentials via environment variables in the compose file
-- Created `.env` with `DATABASE_URL` connection string for Prisma
+- Created `.env` with `DATABASE_URL` connection string pointing to port 5433
 - Verified `.gitignore` already covers `.env*` (line 34, added by create-next-app)
 - PostgreSQL container started and verified via `docker ps` and Docker Desktop UI
+- Installed Prisma 6 (CLI + Client) and initialized schema
+- Defined `User` model with UUID, email, password, role enum, and timestamps
+- Ran first migration — `users` table created in PostgreSQL
+- Prisma Client generated in `node_modules/@prisma/client`
 
 ### Files Created
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Defines PostgreSQL service, port mapping, and persistent volume |
+| `docker-compose.yml` | Defines PostgreSQL service, port mapping (5433→5432), and persistent volume |
 | `.env` | Stores `DATABASE_URL` for Prisma database connection |
+| `prisma/schema.prisma` | Prisma schema with User model, Role enum, and PostgreSQL datasource |
+| `prisma/migrations/20260211182853_init/migration.sql` | Auto-generated SQL for initial migration |
 
 ### Technical Decisions
 
 | Decision | Reasoning |
 |---|---|
 | `postgres:16-alpine` | Lightweight image (~80MB vs ~400MB full), PostgreSQL 16 is latest stable |
+| Port `5433` (not `5432`) | Avoids conflict with locally installed PostgreSQL (see Lessons Learned) |
 | Only DB in Docker, not the app | Next.js runs better natively for dev (hot reload, debugging). DB in container for portability |
 | Named volume (`pgdata`) | Persists data between container restarts. Without it, `docker compose down` would erase all data |
 | `restart: unless-stopped` | Auto-recovers from crashes without manual intervention |
 | Dev credentials in compose | Acceptable for local dev. Production would use secrets management |
 | `.env` for `DATABASE_URL` | Standard 12-factor app pattern. Prisma reads it automatically |
+| Prisma 6 instead of 7 | Prisma 7 has confirmed bugs on Windows ([#28756](https://github.com/prisma/prisma/issues/28756)). Prisma 6 is stable and sufficient for this MVP |
+
+### Lessons Learned: Port Conflict Debugging
+
+> **Root Cause:** A locally installed PostgreSQL on Windows was listening on port `5432`, the same default port as the Docker container. All connections from the host machine reached the **local** PostgreSQL (which didn't have the `calendarium` user) instead of the Docker container.
+>
+> **Why it was hard to find:**
+> - `docker exec psql` connected from **inside** the container, bypassing the port conflict entirely — so it always worked
+> - The Prisma error message (`credentials for (not available)`) was misleading — it hid the actual auth failure
+> - We initially blamed Prisma 7's new `prisma.config.ts` architecture, then SCRAM-SHA-256, then Git Bash. All were red herrings.
+>
+> **How we found it:**
+> 1. Installed `pg` npm package and tested TCP connection from Node.js directly → failed with "password authentication failed"
+> 2. Confirmed the issue was NOT Prisma-specific
+> 3. Ran `netstat -ano | findstr :5432` → found **two** processes (PIDs 14656 and 30540) listening on port 5432
+> 4. Changed Docker mapping to `5433:5432` → connection succeeded immediately
+>
+> **Fix:** Map Docker container to port `5433` externally, keep `5432` internally.
+>
+> **Takeaways:**
+> - Always check for port conflicts before blaming the tool (`netstat -ano | findstr :PORT`)
+> - `docker exec` tests prove the container works, NOT that the host can reach it
+> - When debugging connection issues, test with the simplest possible client first (raw `pg` package) before blaming ORMs
+> - A stale `export DATABASE_URL=...` in a shell session overrides `.env` — always `unset` after debugging
+>
+> **Additional note:** Prisma 7 does have a confirmed Windows bug ([prisma/prisma#28756](https://github.com/prisma/prisma/issues/28756)), but it was NOT the cause of our issue. We kept Prisma 6 anyway as it is more stable and sufficient for this project.
+
+### Problems Encountered
+
+- Port conflict with locally installed PostgreSQL (see Lessons Learned above)
+- Stale `export DATABASE_URL` in shell session overriding `.env` file
+
+### Current System State
+
+- PostgreSQL 16 running in Docker container `calendarium-db`
+- Port `5433` exposed to host (mapped to internal `5432`)
+- Database `calendarium` with `users` table and `_prisma_migrations` table
+- Prisma 6.19.2 installed (CLI + Client)
+- First migration applied (`20260211182853_init`)
+- Prisma Client generated in `node_modules/@prisma/client`
+- **Stage 2 complete.**
+
+---
+
+## Stage 3 – Prisma Client Singleton, Validation & Register API
+
+### Objective
+
+Create the Prisma Client singleton, install validation/hashing dependencies, and build the `/api/auth/register` route.
+
+### Commands Executed
+
+```bash
+# (to be filled as we execute)
+```
+
+### What Was Done
+
+- Created `src/lib/prisma.ts` — Prisma Client singleton
+
+### Key Concept: Prisma Client Singleton Pattern
+
+**Problem it solves:**
+
+In development, Next.js performs **hot module replacement (HMR)** on every file save. If `new PrismaClient()` is called inside an API route or server component, each HMR cycle creates a **new database connection**. After a few minutes of active development, this leads to:
+
+```
+Error: Too many clients already
+```
+
+PostgreSQL has a default limit of 100 connections. Without the singleton, you can exhaust this limit in minutes.
+
+**How the singleton works:**
+
+```typescript
+// src/lib/prisma.ts
+import { PrismaClient } from "@prisma/client";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+}
+```
+
+**Mechanism:**
+
+| Environment | Behavior |
+|---|---|
+| **Development** | The instance is stored on `globalThis` (Node.js global object). `globalThis` survives HMR, so the same PrismaClient is reused across hot reloads. Only one connection is ever opened. |
+| **Production** | The module is loaded once (no HMR). The `if` block doesn't execute, but it doesn't matter — there's only one instance anyway. |
+
+**Why `globalThis` and not a module-level variable?**
+
+Module-level variables (`const prisma = new PrismaClient()`) are re-evaluated on every HMR cycle because Node.js re-imports the module. `globalThis` is the only object that persists across module re-evaluations in Next.js dev mode.
+
+### Technical Decisions
+
+| Decision | Reasoning |
+|---|---|
+| `src/lib/prisma.ts` | Convention for shared utilities. `lib/` signals "infrastructure code, not business logic" |
+| Singleton via `globalThis` | Official Prisma + Next.js recommended pattern to prevent connection exhaustion |
+| `?? new PrismaClient()` | Nullish coalescing — creates a new instance only if one doesn't exist |
+
+### Dependencies Installed
+
+```bash
+npm install bcryptjs zod
+npm install @types/bcryptjs --save-dev
+npm install pg --save-dev  # Used during Stage 2 debugging, kept for potential direct queries
+```
+
+| Package | Type | Purpose |
+|---|---|---|
+| `zod` | runtime | Schema validation for user input |
+| `bcryptjs` | runtime | Password hashing (pure JS, no native compilation needed) |
+| `@types/bcryptjs` | devDependency | TypeScript type definitions for bcryptjs |
+
+### Key Concept: Why `bcryptjs` instead of `bcrypt`
+
+`bcrypt` is a native C++ addon that requires `node-gyp` to compile. On Windows this frequently fails due to missing build tools (Visual Studio, Python). `bcryptjs` is a pure JavaScript implementation with an identical API. The performance difference (~3x slower on hash operations) is irrelevant for an MVP — a hash still takes < 200ms vs < 70ms per operation. For production at scale, native `bcrypt` would be reconsidered.
+
+### Key Concept: Zod Validation Schema
+
+**File:** `src/lib/validators.ts`
+
+```typescript
+import { z } from "zod";
+
+export const registerSchema = z.object({
+  email: z
+    .string()
+    .email("Invalid email address")
+    .transform((val) => val.toLowerCase()),
+
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters long")
+    .max(32, "Password must be less than 32 characters long")
+    .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+    .regex(/[0-9]/, "Password must contain at least one number"),
+});
+
+export type RegisterSchema = z.infer<typeof registerSchema>;
+```
+
+**Why Zod and not manual validation?**
+
+| Approach | Problem |
+|---|---|
+| Manual `if/else` | Verbose, error-prone, no type inference, hard to maintain |
+| Zod schema | Declarative, auto-generates TypeScript types, composable, reusable on frontend and backend |
+
+**Why the schema lives in `src/lib/validators.ts` (not in the route)?**
+
+- **Reusability:** Same schema can be imported by the frontend form for client-side validation
+- **Single source of truth:** Validation rules defined once, used everywhere
+- **Testability:** Can be unit-tested independently from HTTP layer
+
+**Design decisions in the schema:**
+
+| Rule | Reasoning |
+|---|---|
+| `.email()` | Zod built-in email format validation |
+| `.transform(val => val.toLowerCase())` | Normalizes email to prevent duplicates (`User@Mail.com` vs `user@mail.com`) |
+| `.min(8)` | Industry standard minimum password length |
+| `.max(32)` | bcrypt silently truncates input at 72 bytes. 32 chars keeps well within this limit while being user-friendly |
+| `.regex(/[A-Z]/)` | At least one uppercase letter — basic complexity requirement |
+| `.regex(/[0-9]/)` | At least one number — basic complexity requirement |
+| `z.infer<typeof registerSchema>` | Extracts the TypeScript type from the schema. Result: `{ email: string; password: string }` — but guaranteed to have passed validation |
+
+### Key Concept: Password Utility Extraction (`src/lib/auth.ts`)
+
+```typescript
+import bcrypt from "bcryptjs";
+
+const SALT_ROUNDS = 12;
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, SALT_ROUNDS);
+}
+
+export async function comparePassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
+}
+```
+
+**Why extract this?**
+
+| Criterion | Applies? |
+|---|---|
+| Used in more than one place (register + login) | Yes |
+| Encapsulates implementation detail (salt rounds) | Yes |
+| If bcrypt is swapped for argon2, only one file changes | Yes |
+| Improves readability (`hashPassword(pw)` vs `bcrypt.hash(pw, 12)`) | Yes |
+
+**Why NOT extract other things (yet)?**
+
+- `findUnique` for user existence → one-liner, only used in register. YAGNI.
+- Zod `safeParse` + 400 response → each route may have different schemas and error formats. The schema itself is already reusable.
+
+**Rule of thumb:** Extract when the same logic appears in 2+ places, encapsulates a meaningful detail, or improves readability. Don't extract to "prepare for the future" — refactor when the need is real.
+
+### Key Concept: Register API Route (`POST /api/auth/register`)
+
+**File:** `src/app/api/auth/register/route.ts`
+
+**Request flow:**
+
+```
+Client POST → Validate (Zod) → Check duplicate (Prisma) → Hash (bcrypt) → Create (Prisma) → Response
+```
+
+**HTTP status codes used:**
+
+| Status | Meaning | When |
+|---|---|---|
+| `201 Created` | Success, resource created | User registered successfully |
+| `400 Bad Request` | Client sent invalid data | Zod validation failed |
+| `409 Conflict` | Resource already exists | Email already registered |
+| `500 Internal Server Error` | Unexpected failure | Database error, unhandled exception |
+
+**Security decisions in the route:**
+
+| Decision | Reasoning |
+|---|---|
+| `safeParse` instead of `parse` | Returns a result object instead of throwing. Gives control over error response without nested try/catch |
+| `flatten().fieldErrors` | Formats errors per field so frontend can map each error to its input |
+| `findUnique` before `create` | Clean error message for duplicates. Alternative: catch Prisma's unique constraint error, but less readable |
+| `hashPassword(password)` | Delegates to `lib/auth.ts`. Salt rounds (12) centralized. 12 is current industry standard (10 minimum, 12 recommended) |
+| Response excludes `password` | Never expose the hash, even in success responses. Explicit field selection instead of spread |
+| `try/catch` wraps everything | Prevents stack traces from leaking to the client |
+
+**Tested scenarios:**
+
+```bash
+# Test 1 — Successful registration
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "Test1234"}'
+# → 201: { id, email, role: "USER", createdAt }
+
+# Test 2 — Duplicate email
+# (same curl again)
+# → 409: { error: "Email already registered" }
+
+# Test 3 — Validation failure
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "not-an-email", "password": "short"}'
+# → 400: { error: "Validation failed", details: { email: [...], password: [...] } }
+```
+
+### Files Created in This Stage
+
+| File | Purpose |
+|---|---|
+| `src/lib/prisma.ts` | Prisma Client singleton (prevents connection exhaustion in dev) |
+| `src/lib/validators.ts` | Zod validation schemas (reusable on frontend and backend) |
+| `src/lib/auth.ts` | Password hashing/comparison utilities (centralizes bcrypt config) |
+| `src/app/api/auth/register/route.ts` | `POST /api/auth/register` endpoint |
+
+### Project Structure After This Stage
+
+```
+src/
+├── app/
+│   ├── api/
+│   │   └── auth/
+│   │       └── register/
+│   │           └── route.ts       ← Register endpoint
+│   ├── favicon.ico
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx
+└── lib/
+    ├── auth.ts                    ← Password utilities
+    ├── prisma.ts                  ← DB client singleton
+    └── validators.ts              ← Zod schemas
+```
 
 ### Problems Encountered
 
@@ -150,8 +466,8 @@ None.
 
 ### Current System State
 
-- PostgreSQL 16 running in Docker container `calendarium-db`
-- Port `5432` exposed to localhost
-- Database `calendarium` created with user `calendarium`
-- `.env` configured with connection string
-- **Next step:** Install Prisma and initialize schema
+- `POST /api/auth/register` — fully functional with validation, duplicate check, hashing
+- Prisma Client singleton preventing connection exhaustion
+- Password utilities ready for login (comparePassword already implemented)
+- Zod schemas ready for frontend reuse
+- **Stage 3 complete.** Next: Stage 4 — Login API and Landing Page
