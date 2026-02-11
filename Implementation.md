@@ -592,4 +592,134 @@ None.
 - `POST /api/auth/login` — functional (validation, credential check, secure errors)
 - Full auth cycle works: register a user, then login with same credentials
 - No session/JWT yet — login only verifies credentials and returns user data
-- **Stage 4 complete.** Next: add session management or build the Landing Page UI
+- **Stage 4 complete.**
+
+---
+
+## Stage 5 – Code Standards (Prettier + ESLint)
+
+### Objective
+
+Enforce consistent code formatting and style across the entire codebase using Prettier and ESLint together.
+
+### Commands Executed
+
+```bash
+# Install Prettier and ESLint-Prettier integration
+npm install --save-dev prettier eslint-config-prettier
+
+# Format entire codebase
+npx prettier --write .
+
+# Verify ESLint still passes
+npm run lint
+```
+
+### What Was Done
+
+- Installed Prettier (v3) and eslint-config-prettier
+- Created `.prettierrc` with project formatting rules
+- Created `.prettierignore` to skip generated files
+- Added `eslint-config-prettier` to ESLint config (disables conflicting rules)
+- Added `format` and `format:check` scripts to `package.json`
+- Formatted all existing files with `prettier --write .`
+
+### Files Created
+
+| File | Purpose |
+|---|---|
+| `.prettierrc` | Prettier configuration (2-space, double quotes, semicolons, 100 char width) |
+| `.prettierignore` | Excludes `node_modules`, `.next`, `prisma/migrations` from formatting |
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `eslint.config.mjs` | Added `prettierConfig` to disable conflicting ESLint rules |
+| `package.json` | Added `format` and `format:check` scripts |
+
+### Technical Decisions
+
+| Decision | Reasoning |
+|---|---|
+| Prettier + ESLint (not just ESLint) | ESLint catches bugs/patterns, Prettier formats code. Different responsibilities |
+| `eslint-config-prettier` | Disables ESLint formatting rules that conflict with Prettier. They coexist without clashes |
+| `singleQuote: false` | Double quotes are consistent with JSX convention (JSX always uses double quotes) |
+| `trailingComma: "all"` | Cleaner git diffs — adding a line doesn't modify the previous one |
+| `printWidth: 100` | Balance between readability and space. 80 is too narrow for JSX/TSX |
+| `endOfLine: "lf"` | Prevents line ending conflicts between Windows (CRLF) and Linux/Mac (LF) |
+
+### Problems Encountered
+
+None.
+
+### Current System State
+
+- Prettier configured and all files formatted
+- ESLint + Prettier integrated without conflicts
+- `npm run format` / `npm run format:check` available
+- **Stage 5 complete.**
+
+---
+
+## Stage 6 – Testing Setup (Vitest)
+
+### Objective
+
+Set up a testing framework and write unit tests for existing business logic (validators, password utilities).
+
+### Commands Executed
+
+```bash
+# Install testing dependencies
+npm install --save-dev vitest @testing-library/react @testing-library/jest-dom @testing-library/user-event jsdom @vitejs/plugin-react
+
+# Run tests
+npm run test
+# → 2 files, 12 tests passed
+```
+
+### What Was Done
+
+- Installed Vitest with React Testing Library and jsdom
+- Created `vitest.config.ts` with path aliases and jsdom environment
+- Created `src/test/setup.ts` for global test matchers
+- Wrote 9 unit tests for Zod validators (registerSchema + loginSchema)
+- Wrote 3 unit tests for password utilities (hash, compare, salt uniqueness)
+- Added `test` and `test:watch` scripts to `package.json`
+
+### Files Created
+
+| File | Purpose |
+|---|---|
+| `vitest.config.ts` | Vitest configuration with jsdom, path aliases, setup file |
+| `src/test/setup.ts` | Registers `@testing-library/jest-dom` matchers globally |
+| `src/lib/__tests__/validators.test.ts` | 9 tests for registerSchema and loginSchema |
+| `src/lib/__tests__/auth.test.ts` | 3 tests for hashPassword and comparePassword |
+
+### Test Coverage
+
+| Test file | Tests | What it covers |
+|---|---|---|
+| `validators.test.ts` | 9 | Valid input, email normalization, invalid email, short password, no uppercase, no number, too long, login accepts any non-empty password, login rejects empty |
+| `auth.test.ts` | 3 | Hash produces bcrypt format, wrong password rejected, same password produces different hashes (salt) |
+
+### Technical Decisions
+
+| Decision | Reasoning |
+|---|---|
+| Vitest over Jest | Native ESM support, faster execution (Vite-powered), same API (`describe/it/expect`), better TS support |
+| `__tests__/` folders | Co-locates tests near the code they test. Alternative: top-level `tests/` folder, but co-location is better for discoverability |
+| `*.test.ts` naming | Vitest convention. Important: `*.tests.ts` (plural) is NOT matched — caught this typo during setup |
+| Unit tests first, integration later | Unit tests are fast, reliable, and test business logic in isolation. Integration tests (API routes) can be added incrementally |
+
+### Problems Encountered
+
+- File named `auth.tests.ts` (plural) was not picked up by Vitest. Renamed to `auth.test.ts` (singular) to match the `*.test.ts` glob pattern. Lesson: always verify test file naming matches the runner's pattern.
+
+### Current System State
+
+- 12 unit tests passing (2 test files)
+- `npm run test` / `npm run test:watch` available
+- Testing infrastructure ready for component and integration tests
+- **Stage 6 complete.**
