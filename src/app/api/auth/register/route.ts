@@ -4,33 +4,30 @@ import { prisma } from "@/lib/prisma";
 import { registerSchema } from "@/lib/validators";
 
 export async function POST(request: NextRequest) {
-  try { 
+  try {
     const body = await request.json();
-    
+
     // 1. Validate input
     const result = registerSchema.safeParse(body);
 
     if (!result.success) {
       return NextResponse.json(
         { error: "Validation failed", details: result.error.flatten().fieldErrors },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const { email, password } = result.data;
-    
+
     // 2. Check if user already exists
     const existingUser = await prisma.user.findUnique({
       where: { email },
     });
 
     if (existingUser) {
-      return NextResponse.json(
-        { error: "Email already registered" },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: "Email already registered" }, { status: 409 });
     }
-    
+
     // 3. Hash password
     const hashedPassword = await hashPassword(password);
 
@@ -50,15 +47,10 @@ export async function POST(request: NextRequest) {
         role: user.role,
         createdAt: user.createdAt,
       },
-      { status: 201 }
+      { status: 201 },
     );
-
-   }
-  catch (error) {
+  } catch (error) {
     console.error("Register error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
