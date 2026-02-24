@@ -10,7 +10,7 @@
 
 **Start Date:** 2026-02-11
 
-**Stack:** Next.js (App Router) · TypeScript · Prisma · PostgreSQL · Docker · bcrypt · Zod
+**Stack:** Next.js (App Router) · TypeScript · Prisma · PostgreSQL · Docker · bcrypt · Zod · jose (JWT)
 
 ---
 
@@ -723,3 +723,205 @@ npm run test
 - `npm run test` / `npm run test:watch` available
 - Testing infrastructure ready for component and integration tests
 - **Stage 6 complete.**
+
+---
+
+## Stage 7 – Landing Page and Auth UI
+
+### Objective
+
+Create a landing page with registration and login modals. Users can create accounts or sign in via modal forms that call the existing auth API endpoints.
+
+### What Was Done
+
+- Replaced the default Next.js landing page with a branded Calendarium home
+- Added "Registrarse" and "Ingresar" buttons in header and hero section
+- Created a reusable `Modal` component with overlay, Escape key, and outside-click-to-close
+- Created `RegisterModal` with fields: name, surname, email, password, confirm password
+- Created `LoginModal` with fields: email, password
+- Added `authClient` for API calls with error handling and `credentials: "include"` for cookies
+- Extended `registerSchema` to include `name` and `surname`; updated register API to persist them
+- Both modals display validation errors from the API and redirect on success
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `src/components/ui/Modal.tsx` | Reusable modal with overlay, portal to `document.body`, Escape/outside-click close |
+| `src/components/auth/RegisterModal.tsx` | Registration form (name, surname, email, password x2) → `POST /api/auth/register` |
+| `src/components/auth/LoginModal.tsx` | Login form (email, password) → `POST /api/auth/login` |
+| `src/lib/authClient.ts` | `login()` and `register()` helpers with `fetch`, error parsing, `credentials: "include"` |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/app/page.tsx` | Replaced default content with landing: hero, CTA buttons, modal state |
+| `src/lib/validators.ts` | Added `name`, `surname` to `registerSchema` |
+| `src/app/api/auth/register/route.ts` | Accepts and persists `name`, `surname` |
+
+### Key Concept: Modal Component
+
+**File:** `src/components/ui/Modal.tsx`
+
+- Uses `createPortal` to render into `document.body` (avoids z-index/overflow issues)
+- Uses `useSyncExternalStore` to detect client (avoids React 19 "setState in effect" warning and SSR hydration mismatch)
+- Closes on Escape key and click outside the content area
+- `role="dialog"` and `aria-modal="true"` for accessibility
+
+### Key Concept: Auth Client
+
+**File:** `src/lib/authClient.ts`
+
+- Centralizes `fetch` to auth endpoints with `credentials: "include"` so cookies are sent/received
+- Parses API error responses (`error`, `details`) and throws an `Error` with `details` attached for field-level display
+- Exports `LoginResponse` and `RegisterResponse` types for type-safe responses
+
+### Project Structure After This Stage
+
+```
+src/
+├── app/
+│   ├── api/auth/...
+│   └── page.tsx              ← Landing page
+├── components/
+│   ├── auth/
+│   │   ├── LoginModal.tsx
+│   │   └── RegisterModal.tsx
+│   └── ui/
+│       └── Modal.tsx
+└── lib/
+    ├── authClient.ts         ← API client for login/register
+    └── ...
+```
+
+### Current System State
+
+- Landing page with branded hero and CTA buttons
+- Registration and login modals with validation and error display
+- Full auth flow: register → close modal → (no session yet)
+- Full auth flow: login → close modal → (no session yet)
+- **Stage 7 complete.**
+
+---
+
+## Stage 8 – Session Management (JWT + Protected Routes)
+
+### Objective
+
+Implement real session persistence using JWT in HTTP-only cookies. Protect `/dashboard` and redirect users based on auth state. Enable logout.
+
+### Commands Executed
+
+```bash
+npm install jose
+```
+
+### What Was Done
+
+- Installed `jose` for JWT signing/verification (edge-compatible, zero deps)
+- Created `src/lib/session.ts` with token creation, verification, and cookie options
+- Updated login and register API routes to set session cookie on success
+- Created `/api/auth/me` (GET) to return current user from cookie
+- Created `/api/auth/logout` (POST) to clear cookie and redirect to `/`
+- Created `middleware.ts` to protect `/dashboard` and redirect logged-in users from `/` to `/dashboard`
+- Created `/dashboard` page (protected) with user email and logout button
+- Updated `LoginModal` and `RegisterModal` to redirect to `/dashboard` on success
+- Added `JWT_SECRET` to `.env` and `.env.example`
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `src/lib/session.ts` | JWT creation (`createSessionToken`), verification (`verifySessionToken`), cookie options |
+| `src/app/api/auth/me/route.ts` | `GET /api/auth/me` — returns current user if session valid |
+| `src/app/api/auth/logout/route.ts` | `POST /api/auth/logout` — clears cookie, redirects to `/` |
+| `src/app/dashboard/page.tsx` | Protected dashboard page (Server Component) |
+| `middleware.ts` | Protects `/dashboard`, redirects logged-in users from `/` to `/dashboard` |
+| `.env.example` | Documents `JWT_SECRET` (min 32 chars) |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/app/api/auth/login/route.ts` | Creates JWT, sets `calendarium_session` cookie on success |
+| `src/app/api/auth/register/route.ts` | Creates JWT, sets cookie on success (auto-login after register) |
+| `src/lib/authClient.ts` | Added `credentials: "include"` to fetch |
+| `src/components/auth/LoginModal.tsx` | `router.push("/dashboard")` on success |
+| `src/components/auth/RegisterModal.tsx` | `router.push("/dashboard")` on success |
+| `src/app/page.tsx` | Removed user state (redirect handles flow) |
+| `.env` | Added `JWT_SECRET` for development |
+
+### Key Concept: Session Library (`src/lib/session.ts`)
+
+**Responsibilities:**
+
+| Function | Purpose |
+|----------|---------|
+| `getSecret()` | Reads `JWT_SECRET` from env, enforces min 32 chars, returns `Uint8Array` for jose |
+| `createSessionToken(payload)` | Signs JWT with `sub`, `email`, `role`; 7-day expiry; HS256 |
+| `verifySessionToken(token)` | Verifies signature and expiry; returns payload or throws |
+| `getSessionCookieOptions()` | Returns cookie config: `httpOnly`, `secure` (prod), `sameSite: "lax"`, `path`, `maxAge` |
+
+**Security decisions:**
+
+| Option | Value | Reasoning |
+|--------|-------|-----------|
+| `httpOnly` | `true` | Cookie not accessible via JS → mitigates XSS token theft |
+| `secure` | `true` in prod | Cookie only sent over HTTPS in production |
+| `sameSite` | `"lax"` | CSRF protection while allowing normal navigation |
+| `maxAge` | 7 days | Balance between UX and security; tokens expire automatically |
+
+### Key Concept: Middleware Flow
+
+**File:** `middleware.ts`
+
+1. **Landing (`/`) + valid session** → redirect to `/dashboard`
+2. **Protected path (`/dashboard` or subpaths) + no/invalid session** → redirect to `/`, clear cookie if invalid
+3. **Other paths** → pass through
+
+`getValidToken()` reads the cookie and verifies the JWT. Invalid or expired tokens are treated as no session.
+
+### Key Concept: Dashboard Page
+
+**File:** `src/app/dashboard/page.tsx`
+
+- Server Component: reads cookie via `cookies()`, verifies token with `verifySessionToken`
+- If no token → `redirect("/")` (middleware also protects, but defense in depth)
+- Renders user email and logout form (`POST /api/auth/logout`)
+- Logout route clears cookie and redirects to `/`
+
+### Environment Variables
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `JWT_SECRET` | Yes | Secret for signing/verifying JWTs. Must be ≥ 32 characters. Generate with `openssl rand -base64 32` for production. |
+
+### Project Structure After This Stage
+
+```
+calendarium/
+├── middleware.ts             ← Route protection
+├── src/
+│   ├── app/
+│   │   ├── api/auth/
+│   │   │   ├── login/route.ts    (sets cookie)
+│   │   │   ├── logout/route.ts   (clears cookie, redirects)
+│   │   │   ├── me/route.ts       (returns current user)
+│   │   │   └── register/route.ts (sets cookie)
+│   │   ├── dashboard/
+│   │   │   └── page.tsx          ← Protected page
+│   │   └── page.tsx              ← Landing (redirects if logged in)
+│   └── lib/
+│       ├── authClient.ts
+│       └── session.ts            ← JWT + cookie config
+└── .env.example
+```
+
+### Current System State
+
+- Login and register set `calendarium_session` cookie (HTTP-only, 7-day JWT)
+- Unauthenticated users hitting `/dashboard` → redirected to `/`
+- Authenticated users hitting `/` → redirected to `/dashboard`
+- Logout clears cookie and redirects to `/`
+- **Stage 8 complete.**

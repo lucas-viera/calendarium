@@ -8,6 +8,7 @@ async function postJSON<TResponse>(url: string, body: unknown): Promise<TRespons
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    credentials: "include",
   });
   
   const data = (await res.json().catch(() => ({}))) as unknown;

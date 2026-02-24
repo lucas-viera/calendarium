@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { comparePassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { createSessionToken, getSessionCookieOptions, COOKIE_NAME } from "@/lib/session";
 import { loginSchema } from "@/lib/validators";
 
 export async function POST(request: NextRequest) {
@@ -35,13 +36,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
-    // 4. Return user without password
-    return NextResponse.json({
+    // 4. Create session token and set cookie
+    const token = await createSessionToken({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    const response = NextResponse.json({
       id: user.id,
       email: user.email,
       role: user.role,
       createdAt: user.createdAt,
     });
+
+    const opts = getSessionCookieOptions();
+    response.cookies.set(COOKIE_NAME, token, opts);
+
+    return response;
   } catch (error) {
     console.error("Login error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

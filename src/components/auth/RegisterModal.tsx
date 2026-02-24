@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { register } from "@/lib/authClient";
 
@@ -14,6 +15,7 @@ export function RegisterModal(props: {
   onSuccess?: () => void;
 }) {
   const { open, onClose, onSuccess } = props;
+  const router = useRouter();
 
   const [name, setName] = useState("");
   const [surname, setSurname] = useState("");
@@ -38,14 +40,14 @@ export function RegisterModal(props: {
     setLoading(true);
     try {
       await register({ name, surname, email, password: password1 });
-      onSuccess?.();
       onClose();
-      // opcional: reset de campos
       setName("");
       setSurname("");
       setEmail("");
       setPassword1("");
       setPassword2("");
+      onSuccess?.();
+      router.push("/dashboard");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Error registrando usuario.";
       const details = (err as { details?: Record<string, string[]> }).details;

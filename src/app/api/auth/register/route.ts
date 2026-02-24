@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { createSessionToken, getSessionCookieOptions, COOKIE_NAME } from "@/lib/session";
 import { registerSchema } from "@/lib/validators";
 
 export async function POST(request: NextRequest) {
@@ -41,8 +42,14 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 5. Return user without password
-    return NextResponse.json(
+    // 5. Create session token and set cookie (auto-login after register)
+    const token = await createSessionToken({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    const response = NextResponse.json(
       {
         id: user.id,
         name: user.name,
@@ -53,6 +60,11 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 },
     );
+
+    const opts = getSessionCookieOptions();
+    response.cookies.set(COOKIE_NAME, token, opts);
+
+    return response;
   } catch (error) {
     console.error("Register error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

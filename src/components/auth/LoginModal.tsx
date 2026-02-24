@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
-import { login, LoginResponse } from "@/lib/authClient";
+import { login } from "@/lib/authClient";
 
 function fieldClass() {
   return "w-full rounded-lg border border-black/15 bg-background px-3 py-2 text-sm outline-none focus:border-black/30";
@@ -11,9 +12,10 @@ function fieldClass() {
 export function LoginModal(props: {
   open: boolean;
   onClose: () => void;
-  onLoggedIn?: (user: LoginResponse) => void;
+  onLoggedIn?: () => void;
 }) {
   const { open, onClose, onLoggedIn } = props;
+  const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,11 +31,12 @@ export function LoginModal(props: {
 
     setLoading(true);
     try {
-      const user = await login({ email, password });
-      onLoggedIn?.(user);
+      await login({ email, password });
       onClose();
       setEmail("");
       setPassword("");
+      onLoggedIn?.();
+      router.push("/dashboard");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Error iniciando sesión.";
       const details = (err as { details?: Record<string, string[]> }).details;

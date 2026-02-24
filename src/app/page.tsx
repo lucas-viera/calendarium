@@ -3,12 +3,10 @@
 import React, { useState } from "react";
 import { RegisterModal } from "@/components/auth/RegisterModal";
 import { LoginModal } from "@/components/auth/LoginModal";
-import type { LoginResponse } from "@/lib/authClient";
 
 export default function Home() {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
-  const [user, setUser] = useState<LoginResponse | null>(null);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -38,12 +36,6 @@ export default function Home() {
           <p className="text-zinc-600 dark:text-zinc-400">
             Crea tu cuenta o ingresa para empezar a usar Calendarium.
           </p>
-
-          {user ? (
-            <div className="rounded-xl border border-black/10 bg-black/5 px-4 py-3 text-sm">
-              Sesión iniciada como <span className="font-medium">{user.email}</span>
-            </div>
-          ) : null}
         </section>
 
         <section className="rounded-2xl border border-black/10 bg-white/40 p-6 shadow-sm dark:bg-black/20">
@@ -72,15 +64,13 @@ export default function Home() {
       <RegisterModal
         open={registerOpen}
         onClose={() => setRegisterOpen(false)}
-        onSuccess={() => {
-          // acá después podrías redirigir a /dashboard
-        }}
+        onSuccess={() => {}}
       />
 
       <LoginModal
         open={loginOpen}
         onClose={() => setLoginOpen(false)}
-        onLoggedIn={(u) => setUser(u)}
+        onLoggedIn={() => {}}
       />
     </div>
   );
